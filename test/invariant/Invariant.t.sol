@@ -52,10 +52,17 @@ contract InvariantTest is StdInvariant, Test {
         targetContract(address(handler));
     }
 
-    function statefulFuzz_ConstantProductFormulaStaysTheSame() public {
+    function statefulFuzz_ConstantProductFormulaStaysTheSameX() public {
         assertEq(
             handler.actualDeltaPoolTokenAmount(),
             handler.expectedDeltaPoolTokenAmount()
+        );
+    }
+
+    function statefulFuzz_ConstantProductFormulaStaysTheSameY() public {
+        assertEq(
+            handler.actualDeltaWethAmount(),
+            handler.expectedDeltaWethAmount()
         );
     }
 }

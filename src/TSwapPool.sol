@@ -396,6 +396,7 @@ contract TSwapPool is ERC20 {
         }
 
         swap_count++;
+        // @todo @audit-v breaks x * y = k invariant
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
             outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
