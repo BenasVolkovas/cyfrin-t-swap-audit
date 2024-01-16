@@ -39,7 +39,7 @@ contract PoolFactory {
                                FUNCTIONS
     //////////////////////////////////////////////////////////////*/
     constructor(address wethToken) {
-        // @todo @audit-i no check for zero address
+        // @done @audit-i no check for zero address
         i_wethToken = wethToken;
     }
 
@@ -47,6 +47,7 @@ contract PoolFactory {
                            EXTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
     function createPool(address tokenAddress) external returns (address) {
+        // @done @audit-i no check for zero address
         if (s_pools[tokenAddress] != address(0)) {
             revert PoolFactory__PoolAlreadyExists(tokenAddress);
         }
