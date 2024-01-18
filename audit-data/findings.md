@@ -1,6 +1,6 @@
 # High
 
-### [H-1] Incorrect "magic number" `10000` is used instead of `1000` causing the protocol to take fee of `90.03%` instead of `0.3%`
+### [H-1] Incorrect fee calculation causes the protocol to take fee of `90.03%` instead of `0.3%` and take funds from users
 
 **Description:** in `TSwapPool::getInputAmountBasedOnOutput`, the `10000` is used as a "magic number" to calculate the input amount. This "magic number" is incorrect and should be `1000`. Incorrect "magic number" causes the protocol to take fee and the user to get only `9.97%` of the output amount instead of `99.7%`.
 
@@ -20,13 +20,73 @@
     6. `10131.404314` ~= `10131 USDC`
 5. User sells `10131 USDC` for `1 WETH`
 
+POC code
+
+Paste this test in `test/unit/TSwapPool.t.sol` directory
+
+```javascript
+    function test_getInputAmountBasedOnOutput_CalculatesTheInputIncorrectly()
+        external
+    {
+        uint256 initialBalance = 1_000_000 ether;
+        uint256 wethReserves = 100 ether;
+        uint256 poolTokenReserves = 100_000 ether;
+        uint256 wethBuyAmount = 1 ether;
+        uint256 expectedPoolTokensSellAmount = ((poolTokenReserves *
+            wethReserves) * 1000) / ((wethReserves - wethBuyAmount) * 997);
+
+        // Setup tokens and pool
+        poolToken = new ERC20Mock();
+        weth = new ERC20Mock();
+        pool = new TSwapPool(
+            address(poolToken),
+            address(weth),
+            "LTokenA",
+            "LA"
+        );
+
+        // Mint tokens for liquidity provider and usr
+        weth.mint(liquidityProvider, initialBalance);
+        poolToken.mint(liquidityProvider, initialBalance);
+
+        weth.mint(user, initialBalance);
+        poolToken.mint(user, initialBalance);
+
+        // Add liquidity (100_000 pool tokens, 100 weth)
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), wethReserves);
+        poolToken.approve(address(pool), poolTokenReserves);
+        pool.deposit(
+            wethReserves,
+            wethReserves,
+            poolTokenReserves,
+            uint64(block.timestamp)
+        );
+        vm.stopPrank();
+
+        // Try to get input amount based on output
+        vm.startPrank(user);
+        uint256 poolTokensSellAmount = pool.getInputAmountBasedOnOutput(
+            wethBuyAmount,
+            poolTokenReserves,
+            wethReserves
+        );
+
+        assertEq(
+            poolTokensSellAmount,
+            expectedPoolTokensSellAmount,
+            "Incorrect pool tokens sell amount"
+        );
+    }
+```
+
 **Recommended Mitigation:** Change the "magic number" `10000` to `1000`. Define constant variable at the beginning of the contract.
 
-### [H-2] Not defining the maximum amount user is willing to spend when calling `TSwapPool::swapExactInput` allows to sandwich the transaction and steal user's money
+### [H-2] Lack of slippage protection in `TSwapPool::swapExactInput` allows to sandwich the transaction and steal user's money
 
-**Description:** In `TSwapPool::swapExactInput`, the `maximumAmountToSpend` parameter is not defined. This means that the user is not protected from price slippage. This allows the attacker to front-run the transaction and increase the price of the token, which will cause the user to spend more than they wanted. After the victim's transaction is mined, the attacker can sell all the tokens they bought and make profit.
+**Description:** In `swapExactInput`, the `maxInputAmount` parameter is not present and users cannot protect themself from slippage. This means that the user is not protected from price changes. This allows the attacker to front-run the transaction and increase the price of the token, which will cause the user to spend more than they wanted. After the victim's transaction is mined, the attacker can sell all the tokens they bought and make profit.
 
-**Impact:** Users might spend more than they wanted. This can cause the user to lose money.
+**Impact:** If market conditions change before the transaction is processed, the user might get a much worse swap and lose money.
 
 **Proof of Concept:**
 
@@ -336,15 +396,18 @@ contract InvariantTest is StdInvariant, Test {
 }
 ```
 
-**Recommended Mitigation:**
+**Recommended Mitigation:** There are few options to mitigate this issue:
+
+1. Remove the transfer of tokens from the pool reserves. This means that the pool will not have less tokens than it should have. This means that the pool will have the correct value.
+2. Mint or transfer another ERC20 token to the user. This means that the pool will have the correct value but users will continue to get incentive tokens.
 
 # Medium
 
-### [M-1] `TSwapPool::deposit` does use `deadline` parameter, allowing miners to delay the execution of the function and front-run the transaction
+### [M-1] `TSwapPool::deposit` does not check `deadline` parameter, causing the transaction to complete even after the deadline
 
-**Description:** In `TSwapPool::deposit`, the `deadline` parameter is not used for validation. This means that miners can delay the execution of the function and execute the function when the price is more favorable for them. This can cause the user to lose money.
+**Description:** In `TSwapPool::deposit`, the `deadline` parameter should limit the transaction execution time according to the documentation: "The deadline for the transaction to be completed by". However, the `deadline` parameter is not checked. This means that the transaction can be executed even after the deadline.
 
-**Impact:** Users might deposit the `maximumPoolTokensToDeposit` amount when it was not needed. This can cause the user to lose money.
+**Impact:** Transactions could be executed when market conditions are unfavorable to deposit, even with a deadline set.
 
 **Proof of Concept:**
 
@@ -363,13 +426,27 @@ contract InvariantTest is StdInvariant, Test {
     }
 ```
 
+```diff
+    function deposit(
+        uint256 wethToDeposit,
+        uint256 minimumLiquidityTokensToMint,
+        uint256 maximumPoolTokensToDeposit,
+        uint64 deadline
+    )
+        external
+        revertIfZero(wethToDeposit)
++       revertIfDeadlinePassed(deadline)
+        returns (uint256 liquidityTokensToMint)
+    {
+```
+
 # Low
 
-### [L-1] Incorrect arguments order for `TSwapPool::LiquidityAdded` event in `TSwapPool::_addLiquidityMintAndTransfer` might cause confusion and incorrect data in subgraph
+### [L-1] Incorrect parameters order for `TSwapPool::LiquidityAdded` event in `TSwapPool::_addLiquidityMintAndTransfer` causes incorrect data emitted in event logs
 
 **Description:** In `TSwapPool::_addLiquidityMintAndTransfer`, the `TSwapPool::LiquidityAdded` event is emitted with incorrect arguments order.
 
-**Impact:** Incorrect data in event logs and subgraph.
+**Impact:** Event emission is incorrect, leading to off-chain services malfunctioning.
 
 **Proof of Concept:** Second parameter is `wethDeposited`, which is the third parameter in the event. And third parameter is `poolTokensMinted`, which is the second parameter in the event. This might cause confusion and incorrect data in subgraph.
 
@@ -381,24 +458,40 @@ contract InvariantTest is StdInvariant, Test {
 
 ```
 
-### [L-2] Nothing is returned in function when it should, making it always to return `0`
+### [L-2] Default value (equal to `0`) is returned by `TSwapPool::swapExactInput` resulting in incorrect return value
 
-**Description:** In `TSwapPool::swapExactInput` never returns anything. This means that the function always returns `0`.
+**Description:** In `TSwapPool::swapExactInput` should return the amount of output tokens user received. However, the function is never assigned a value, so it returns the default value, which is `0`.
 
 **Impact:** The function always returns `0`. This might cause confusion and unexpected bugs when calling the function.
 
-**Proof of Concept:** The function never returns anything.
+**Proof of Concept:** The function will always return `0` instead of the amount of output tokens user received.
 
 **Recommended Mitigation:** Return the output amount.
 
 ```diff
-        if (outputAmount < minOutputAmount) {
-            revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
-        }
+        uint256 inputReserves = inputToken.balanceOf(address(this));
+        uint256 outputReserves = outputToken.balanceOf(address(this));
 
-        _swap(inputToken, inputAmount, outputToken, outputAmount);
-+       output = outputAmount;
+-        uint256 outputAmount = getOutputAmountBasedOnInput(
++        output = getOutputAmountBasedOnInput(
+            inputAmount,
+            inputReserves,
+            outputReserves
+        );
+
+-       if (outputAmount < minOutputAmount) {
+-           revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
+-       }
++       if (output < minOutputAmount) {
++           revert TSwapPool__OutputTooLow(output, minOutputAmount);
++       }
+
+-       _swap(inputToken, inputAmount, outputToken, outputAmount);
++       _swap(inputToken, inputAmount, outputToken, output);
+    }
 ```
+
+````
 
 # Informational
 
@@ -417,7 +510,7 @@ Modifier example:
         }
         _;
     }
-```
+````
 
 ### [I-2] `PoolFactory::createPool` paramerter `tokenAddress` is not checked for zero address, which will revert when calling `ERC20::name`
 
