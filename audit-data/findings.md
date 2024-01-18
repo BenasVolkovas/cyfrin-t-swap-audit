@@ -40,4 +40,16 @@ Modifier example:
     }
 ```
 
+### [I-3] `PoolFactory::PoolFactory__PoolDoesNotExist` error is defined but not used anywhere
+
+**Description:** In `PoolFactory`, the `PoolFactory__PoolDoesNotExist` error is defined but not used anywhere.
+
+**Recommended Mitigation:** Remove the error definition to save contract deployment gas.
+
+### [I-4] `PoolFactory::createPool` uses pool token name for LP token symbol
+
+**Description:** In `PoolFactory::createPool`, the pool token name is used to concatenate with preffix `ts` to create LP token symbol. This means that the LP token symbol will be almost the same as the pool token name, which can cause confusion. Also names might have spaces, which might also be confusing.
+
+**Recommended Mitigation:** Use pool token symbol instead of name to create LP token symbol to avoid confusion.
+
 # Gas Optimization
