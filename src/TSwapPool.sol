@@ -14,14 +14,23 @@
 // SPDX-License-Identifier: GNU General Public License v3.0
 pragma solidity 0.8.20;
 
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract TSwapPool is ERC20 {
     error TSwapPool__DeadlineHasPassed(uint64 deadline);
-    error TSwapPool__MaxPoolTokenDepositTooHigh(uint256 maximumPoolTokensToDeposit, uint256 poolTokensToDeposit);
-    error TSwapPool__MinLiquidityTokensToMintTooLow(uint256 minimumLiquidityTokensToMint, uint256 liquidityTokensToMint);
-    error TSwapPool__WethDepositAmountTooLow(uint256 minimumWethDeposit, uint256 wethToDeposit);
+    error TSwapPool__MaxPoolTokenDepositTooHigh(
+        uint256 maximumPoolTokensToDeposit,
+        uint256 poolTokensToDeposit
+    );
+    error TSwapPool__MinLiquidityTokensToMintTooLow(
+        uint256 minimumLiquidityTokensToMint,
+        uint256 liquidityTokensToMint
+    );
+    error TSwapPool__WethDepositAmountTooLow(
+        uint256 minimumWethDeposit,
+        uint256 wethToDeposit
+    );
     error TSwapPool__InvalidToken();
     error TSwapPool__OutputTooLow(uint256 actual, uint256 min);
     error TSwapPool__MustBeMoreThanZero();
@@ -32,7 +41,7 @@ contract TSwapPool is ERC20 {
                             STATE VARIABLES
     //////////////////////////////////////////////////////////////*/
 
-    // @todo @audit-i reodrder state variables
+    // @done @audit-i reodrder state variables
     IERC20 private immutable i_wethToken;
     IERC20 private immutable i_poolToken;
     uint256 private constant MINIMUM_WETH_LIQUIDITY = 1_000_000_000;
@@ -42,9 +51,23 @@ contract TSwapPool is ERC20 {
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
-    event LiquidityAdded(address indexed liquidityProvider, uint256 wethDeposited, uint256 poolTokensDeposited);
-    event LiquidityRemoved(address indexed liquidityProvider, uint256 wethWithdrawn, uint256 poolTokensWithdrawn);
-    event Swap(address indexed swapper, IERC20 tokenIn, uint256 amountTokenIn, IERC20 tokenOut, uint256 amountTokenOut);
+    event LiquidityAdded(
+        address indexed liquidityProvider,
+        uint256 wethDeposited,
+        uint256 poolTokensDeposited
+    );
+    event LiquidityRemoved(
+        address indexed liquidityProvider,
+        uint256 wethWithdrawn,
+        uint256 poolTokensWithdrawn
+    );
+    event Swap(
+        address indexed swapper,
+        IERC20 tokenIn,
+        uint256 amountTokenIn,
+        IERC20 tokenOut,
+        uint256 amountTokenOut
+    );
 
     /*//////////////////////////////////////////////////////////////
                                MODIFIERS
@@ -71,10 +94,8 @@ contract TSwapPool is ERC20 {
         address wethToken,
         string memory liquidityTokenName,
         string memory liquidityTokenSymbol
-    )
-        ERC20(liquidityTokenName, liquidityTokenSymbol)
-    {
-        // @todo @audit-i no check for zero address
+    ) ERC20(liquidityTokenName, liquidityTokenSymbol) {
+        // @done @audit-i no check for zero address
         i_wethToken = IERC20(wethToken);
         i_poolToken = IERC20(poolToken);
     }
@@ -96,7 +117,8 @@ contract TSwapPool is ERC20 {
         uint256 wethToDeposit,
         uint256 minimumLiquidityTokensToMint,
         uint256 maximumPoolTokensToDeposit,
-        // @todo @audit-v unused param deadline. Use modifier
+        // @done @audit-v @medium nused param deadline. Use modifier
+        // Impact - HIGH; likelihood - LOW
         uint64 deadline
     )
         external
@@ -104,12 +126,15 @@ contract TSwapPool is ERC20 {
         returns (uint256 liquidityTokensToMint)
     {
         if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
-            // @todo @audit-i MINIMUM_WETH_LIQUIDITY is constant, no need to emit it
-            revert TSwapPool__WethDepositAmountTooLow(MINIMUM_WETH_LIQUIDITY, wethToDeposit);
+            // @done @audit-i MINIMUM_WETH_LIQUIDITY is constant, no need to emit it
+            revert TSwapPool__WethDepositAmountTooLow(
+                MINIMUM_WETH_LIQUIDITY,
+                wethToDeposit
+            );
         }
         if (totalLiquidityTokenSupply() > 0) {
             uint256 wethReserves = i_wethToken.balanceOf(address(this));
-            // @todo @audit-g unused variable
+            // @done @audit-g unused variable
             uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
             // Our invariant says weth, poolTokens, and liquidity tokens must always have the same ratio after the
             // initial deposit
@@ -126,23 +151,41 @@ contract TSwapPool is ERC20 {
             // (wethReserves + wethToDeposit) / poolTokensToDeposit = wethReserves
             // (wethReserves + wethToDeposit)  = wethReserves * poolTokensToDeposit
             // (wethReserves + wethToDeposit) / wethReserves  =  poolTokensToDeposit
-            uint256 poolTokensToDeposit = getPoolTokensToDepositBasedOnWeth(wethToDeposit);
+            uint256 poolTokensToDeposit = getPoolTokensToDepositBasedOnWeth(
+                wethToDeposit
+            );
             if (maximumPoolTokensToDeposit < poolTokensToDeposit) {
-                revert TSwapPool__MaxPoolTokenDepositTooHigh(maximumPoolTokensToDeposit, poolTokensToDeposit);
+                revert TSwapPool__MaxPoolTokenDepositTooHigh(
+                    maximumPoolTokensToDeposit,
+                    poolTokensToDeposit
+                );
             }
 
             // We do the same thing for liquidity tokens. Similar math.
-            liquidityTokensToMint = (wethToDeposit * totalLiquidityTokenSupply()) / wethReserves;
+            liquidityTokensToMint =
+                (wethToDeposit * totalLiquidityTokenSupply()) /
+                wethReserves;
             if (liquidityTokensToMint < minimumLiquidityTokensToMint) {
-                revert TSwapPool__MinLiquidityTokensToMintTooLow(minimumLiquidityTokensToMint, liquidityTokensToMint);
+                revert TSwapPool__MinLiquidityTokensToMintTooLow(
+                    minimumLiquidityTokensToMint,
+                    liquidityTokensToMint
+                );
             }
-            _addLiquidityMintAndTransfer(wethToDeposit, poolTokensToDeposit, liquidityTokensToMint);
+            _addLiquidityMintAndTransfer(
+                wethToDeposit,
+                poolTokensToDeposit,
+                liquidityTokensToMint
+            );
         } else {
             // This will be the "initial" funding of the protocol. We are starting from blank here!
             // We just have them send the tokens in, and we mint liquidity tokens based on the weth
-            _addLiquidityMintAndTransfer(wethToDeposit, maximumPoolTokensToDeposit, wethToDeposit);
+            _addLiquidityMintAndTransfer(
+                wethToDeposit,
+                maximumPoolTokensToDeposit,
+                wethToDeposit
+            );
 
-            // @todo @audit-i it would be better if this was before the _addLiquidityMintAndTransfer call
+            // @done @audit-i it would be better if this was before the _addLiquidityMintAndTransfer call
             liquidityTokensToMint = wethToDeposit;
         }
     }
@@ -155,17 +198,19 @@ contract TSwapPool is ERC20 {
         uint256 wethToDeposit,
         uint256 poolTokensToDeposit,
         uint256 liquidityTokensToMint
-    )
-        private
-    {
-        // @todo @audit-v use _safeMint (aderyn report)
+    ) private {
+        // @invalid @audit-v @medium
         _mint(msg.sender, liquidityTokensToMint);
-        // @todo @audit-v LOW incorrect event params order
+        // @done @audit-v LOW incorrect event params order
         emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
 
         // Interactions
         i_wethToken.safeTransferFrom(msg.sender, address(this), wethToDeposit);
-        i_poolToken.safeTransferFrom(msg.sender, address(this), poolTokensToDeposit);
+        i_poolToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            poolTokensToDeposit
+        );
     }
 
     /// @notice Removes liquidity from the pool
@@ -186,16 +231,19 @@ contract TSwapPool is ERC20 {
         revertIfZero(minPoolTokensToWithdraw)
     {
         // We do the same math as above
-        uint256 wethToWithdraw =
-            (liquidityTokensToBurn * i_wethToken.balanceOf(address(this))) / totalLiquidityTokenSupply();
-        uint256 poolTokensToWithdraw =
-            (liquidityTokensToBurn * i_poolToken.balanceOf(address(this))) / totalLiquidityTokenSupply();
+        uint256 wethToWithdraw = (liquidityTokensToBurn *
+            i_wethToken.balanceOf(address(this))) / totalLiquidityTokenSupply();
+        uint256 poolTokensToWithdraw = (liquidityTokensToBurn *
+            i_poolToken.balanceOf(address(this))) / totalLiquidityTokenSupply();
 
         if (wethToWithdraw < minWethToWithdraw) {
             revert TSwapPool__OutputTooLow(wethToWithdraw, minWethToWithdraw);
         }
         if (poolTokensToWithdraw < minPoolTokensToWithdraw) {
-            revert TSwapPool__OutputTooLow(poolTokensToWithdraw, minPoolTokensToWithdraw);
+            revert TSwapPool__OutputTooLow(
+                poolTokensToWithdraw,
+                minPoolTokensToWithdraw
+            );
         }
 
         _burn(msg.sender, liquidityTokensToBurn);
@@ -209,7 +257,7 @@ contract TSwapPool is ERC20 {
                               GET PRICING
     //////////////////////////////////////////////////////////////*/
 
-    // @todo @audit-i no natspec docs
+    // @done @audit-i no natspec docs
     function getOutputAmountBasedOnInput(
         uint256 inputAmount,
         uint256 inputReserves,
@@ -235,14 +283,14 @@ contract TSwapPool is ERC20 {
         // totalPoolTokensOfPool) + (wethToDeposit * poolTokensToDeposit) = k
         // (totalWethOfPool * totalPoolTokensOfPool) + (wethToDeposit * totalPoolTokensOfPool) = k - (totalWethOfPool *
         // poolTokensToDeposit) - (wethToDeposit * poolTokensToDeposit)
-        // @todo @audit-i no magic numbers
+        // @done @audit-i no magic numbers
         uint256 inputAmountMinusFee = inputAmount * 997;
         uint256 numerator = inputAmountMinusFee * outputReserves;
         uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
         return numerator / denominator;
     }
 
-    // @todo @audit-i no natspec docs
+    // @done @audit-i no natspec docs
     function getInputAmountBasedOnOutput(
         uint256 outputAmount,
         uint256 inputReserves,
@@ -254,12 +302,14 @@ contract TSwapPool is ERC20 {
         revertIfZero(outputReserves)
         returns (uint256 inputAmount)
     {
-        // @todo @audit-i no magic numbers
-        // @todo @audit-v HIGH 10'000 should be 1k
-        return ((inputReserves * outputAmount) * 10000) / ((outputReserves - outputAmount) * 997);
+        // @done @audit-i no magic numbers
+        // @done @audit-v HIGH 10'000 should be 1k
+        return
+            ((inputReserves * outputAmount) * 10000) /
+            ((outputReserves - outputAmount) * 997);
     }
 
-    // @todo @audit-i no natspec docs
+    // @done @audit-i no natspec docs
     function swapExactInput(
         IERC20 inputToken, // token to sell (e.g. DAI)
         uint256 inputAmount, // amount of token to sell
@@ -267,20 +317,24 @@ contract TSwapPool is ERC20 {
         uint256 minOutputAmount, // minimum amount of token to buy
         uint64 deadline // deadline for transaction
     )
-        // @todo @audit-g this should be external
         public
+        // @done @audit-g this should be external
         revertIfZero(inputAmount)
         revertIfDeadlinePassed(deadline)
         returns (
-            // @todo @audit-v low impact (will always return 0)
+            // @done @audit-v @low impact (will always return 0)
             uint256 output
         )
     {
-        // @todo @audit-i check that tokens are not zero address
+        // @done @audit-i check that tokens are not zero address
         uint256 inputReserves = inputToken.balanceOf(address(this));
         uint256 outputReserves = outputToken.balanceOf(address(this));
 
-        uint256 outputAmount = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
+        uint256 outputAmount = getOutputAmountBasedOnInput(
+            inputAmount,
+            inputReserves,
+            outputReserves
+        );
 
         if (outputAmount < minOutputAmount) {
             revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
@@ -300,8 +354,8 @@ contract TSwapPool is ERC20 {
      * @param outputToken ERC20 token to send to caller
      * @param outputAmount The exact amount of tokens to send to caller
      */
-    // @todo @audit-i missing nat-specs param deadline
-    // @todo @audit-v no parameter for maximum input amount (max tokens to sell)
+    // @done @audit-i missing nat-specs param deadline
+    // @done @audit-v no parameter for maximum input amount (max tokens to sell)
     function swapExactOutput(
         IERC20 inputToken,
         IERC20 outputToken,
@@ -313,13 +367,17 @@ contract TSwapPool is ERC20 {
         revertIfDeadlinePassed(deadline)
         returns (uint256 inputAmount)
     {
-        // @todo @audit-i check that tokens are not zero address
+        // @done @audit-i check that tokens are not zero address
         uint256 inputReserves = inputToken.balanceOf(address(this));
         uint256 outputReserves = outputToken.balanceOf(address(this));
 
-        inputAmount = getInputAmountBasedOnOutput(outputAmount, inputReserves, outputReserves);
+        inputAmount = getInputAmountBasedOnOutput(
+            outputAmount,
+            inputReserves,
+            outputReserves
+        );
 
-        // @todo @audit-v HIGH no sllipage protection
+        // @done @audit-v HIGH no sllipage protection
 
         _swap(inputToken, inputAmount, outputToken, outputAmount);
     }
@@ -329,10 +387,18 @@ contract TSwapPool is ERC20 {
      * @param poolTokenAmount amount of pool tokens to sell
      * @return wethAmount amount of WETH received by caller
      */
-    function sellPoolTokens(uint256 poolTokenAmount) external returns (uint256 wethAmount) {
-        // @todo @audit-i no swapExactOutput has wrong parameters. It should be weth amount
-        // @todo @audit-i Use swapExactInput instead
-        return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
+    function sellPoolTokens(
+        uint256 poolTokenAmount
+    ) external returns (uint256 wethAmount) {
+        // @skipped @audit-v no swapExactOutput has wrong parameters. It should be weth amount
+        // @done @audit-v @high Use swapExactInput instead
+        return
+            swapExactOutput(
+                i_poolToken,
+                i_wethToken,
+                poolTokenAmount,
+                uint64(block.timestamp)
+            );
     }
 
     /**
@@ -343,8 +409,17 @@ contract TSwapPool is ERC20 {
      * @param outputToken ERC20 token to send to caller
      * @param outputAmount Amount of tokens to send to caller
      */
-    function _swap(IERC20 inputToken, uint256 inputAmount, IERC20 outputToken, uint256 outputAmount) private {
-        if (_isUnknown(inputToken) || _isUnknown(outputToken) || inputToken == outputToken) {
+    function _swap(
+        IERC20 inputToken,
+        uint256 inputAmount,
+        IERC20 outputToken,
+        uint256 outputAmount
+    ) private {
+        if (
+            _isUnknown(inputToken) ||
+            _isUnknown(outputToken) ||
+            inputToken == outputToken
+        ) {
             revert TSwapPool__InvalidToken();
         }
 
@@ -352,11 +427,17 @@ contract TSwapPool is ERC20 {
         // @todo @audit-v breaks x * y = k invariant
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
-            // @todo @audit-i no magic numbers
-            // @todo @audit-i we can save some gas if we transfer the output token only once at the end
+            // @done @audit-i no magic numbers
+            // @done @audit-g we can save some gas if we transfer the output token only once at the end
             outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
         }
-        emit Swap(msg.sender, inputToken, inputAmount, outputToken, outputAmount);
+        emit Swap(
+            msg.sender,
+            inputToken,
+            inputAmount,
+            outputToken,
+            outputAmount
+        );
 
         inputToken.safeTransferFrom(msg.sender, address(this), inputAmount);
         outputToken.safeTransfer(msg.sender, outputAmount);
@@ -372,7 +453,9 @@ contract TSwapPool is ERC20 {
     /*//////////////////////////////////////////////////////////////
                    EXTERNAL AND PUBLIC VIEW AND PURE
     //////////////////////////////////////////////////////////////*/
-    function getPoolTokensToDepositBasedOnWeth(uint256 wethToDeposit) public view returns (uint256) {
+    function getPoolTokensToDepositBasedOnWeth(
+        uint256 wethToDeposit
+    ) public view returns (uint256) {
         uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
         uint256 wethReserves = i_wethToken.balanceOf(address(this));
         return (wethToDeposit * poolTokenReserves) / wethReserves;
@@ -396,20 +479,22 @@ contract TSwapPool is ERC20 {
     }
 
     function getPriceOfOneWethInPoolTokens() external view returns (uint256) {
-        return getOutputAmountBasedOnInput(
-            // @todo @audit-i no magic numbers
-            1e18,
-            i_wethToken.balanceOf(address(this)),
-            i_poolToken.balanceOf(address(this))
-        );
+        return
+            getOutputAmountBasedOnInput(
+                // @done @audit-i no magic numbers
+                1e18,
+                i_wethToken.balanceOf(address(this)),
+                i_poolToken.balanceOf(address(this))
+            );
     }
 
     function getPriceOfOnePoolTokenInWeth() external view returns (uint256) {
-        return getOutputAmountBasedOnInput(
-            // @todo @audit-i no magic numbers
-            1e18,
-            i_poolToken.balanceOf(address(this)),
-            i_wethToken.balanceOf(address(this))
-        );
+        return
+            getOutputAmountBasedOnInput(
+                // @done @audit-i no magic numbers
+                1e18,
+                i_poolToken.balanceOf(address(this)),
+                i_wethToken.balanceOf(address(this))
+            );
     }
 }
