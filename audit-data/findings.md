@@ -129,11 +129,15 @@ Paste this test in `test/unit/TSwapPool.t.sol` directory
     }
 ```
 
-### [H-3] Calling `TSwapPool::sellPoolTokens` does not sell but buys pool tokens causing the user to waste gas
+### [H-3] Calling `TSwapPool::sellPoolTokens` mismatches input and output tokens causing users to receive incorrect amount of tokens
 
-**Description:** In `TSwapPool::sellPoolTokens`, the `swapExactOutput` is called with `outputToken` set to `poolToken`. This means that the user is buying the defined amount of weth tokens instead of selling the pool tokens. This can cause the user to waste tokens for gas and confuse the user.
+**Description:** The`sellPoolTokens` function is intended to allow users to easily sell pool tokens and receive WETH in exchange. Users indicate how many pool tokens they are willing to sell in the `poolTokenAmount` parameter. However, the function currently miscalculates the swapped amount.
 
-**Impact:** Users might waste tokens for gas and lose money.
+This is due to the fact that the function calls `swapExactOutput` with `outputToken` set to `poolToken`. However, the function should call `swapExactInput` with `inputToken` set to `poolToken`. Because user specifies the input amount not the output amount.
+
+, the `swapExactOutput` is called with `outputToken` set to `poolToken`. This means that the user is buying the defined amount of weth tokens instead of selling the pool tokens. This means that the user will receive incorrect amount of tokens.
+
+**Impact:** Users will swap the wrong amount of tokens, which is a critical issue.
 
 **Proof of Concept:**
 
@@ -150,7 +154,7 @@ Paste this test in `test/unit/TSwapPool.t.sol` directory
     7. `~= 100,300.90 USDC`
 5. Users wanted to sell `50 USDC` but instead they sold `100,300.90 USDC` worth of pool tokens.
 
-**Recommended Mitigation:** Use `swapExactInput` instead of `swapExactOutput` to sell pool tokens.
+**Recommended Mitigation:** Use `swapExactInput` instead of `swapExactOutput` to sell pool tokens. Note that this would also require changing the `sellPoolTokens` function to accept `minWethToReceive` which should be passed to `swapExactInput` as `minOutputAmount`.
 
 ```diff
     function sellPoolTokens(
@@ -173,233 +177,75 @@ Paste this test in `test/unit/TSwapPool.t.sol` directory
     }
 ```
 
-### [H-4] Transfering tokens for extra incentives breaks the main `x * y = k` invariant
+### [H-4] Transfering tokens for extra incentives in `TSwapPool::_swap` breaks the main protocol `x * y = k` invariant
 
-**Description:** `_swap` function transfers `1 WETH` to the user if the swap count reaches `SWAP_COUNT_MAX`. This breaks the main `x * y = k` invariant. This means that the pool is not a constant product pool anymore. Also the same amount `1 ether` is used no matter what type of output token is used. This means that some users will get more value than others.
-These tokens are transferred from the pool reserves, which means that the pool will have less tokens than it should have. This means that the pool will have less value than it should have.
+**Description:** The protocol follows a strict invariant of `x * y = k`, where `x` is the amount of pool tokens in the pool, `y` is the amount of WETH tokens in the pool and `k` is constant product of the two balances. This means that whenever the balances change in the protocol, the ratio of the two balances must remain the same. However, this is broken due to the fact that the `_swap` function transfers `1e18` of tokens to the user if the swap count reaches `SWAP_COUNT_MAX`. Meaning that over time the protocol will be drained of tokens.
 
-**Impact:** Transfering tokens from reserves breaks the main `x * y = k` invariant. This means that the pool is not a constant product pool anymore and price of the tokens is not calculated correctly.
+Additionally, the same amount `1e18` is used no matter what type of output token is used (pool token or WETH). This means that some users will get more value than others.
+
+The invariant is broken in the following code:
+
+```javascript
+        swap_count++;
+        if (swap_count >= SWAP_COUNT_MAX) {
+            swap_count = 0;
+@>          outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+        }
+```
+
+**Impact:** A user could maliciously drain the protocol of funds by doing a lot of swaps and collecting the extra incentive given out by the protocol.
 
 **Proof of Concept:**
 
+1. A user swaps 10 times and collects the extra incentive of `1e18` tokens
+2. That user continues to swap untill all the protocol funds are drained
+
 **POC code**
 
-Paste this code as `Handler.t.sol` in `test/invariant` directory
+Paste the following test into `test/unit/TSwapPool.t.sol` file
 
 ```javascript
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
-
-import {Test, console2} from "forge-std/Test.sol";
-import {TSwapPool} from "../../src/TSwapPool.sol";
-import {ERC20Mock} from "../mocks/ERC20Mock.sol";
-
-contract Handler is Test {
-    TSwapPool internal pool;
-    ERC20Mock internal wethToken;
-    ERC20Mock internal poolToken;
-
-    address internal liquidityProvider = makeAddr("lp");
-    address internal swapper = makeAddr("swapper");
-
-    int256 public expectedDeltaWethAmount;
-    int256 public expectedDeltaPoolTokenAmount;
-    int256 public actualDeltaWethAmount;
-    int256 public actualDeltaPoolTokenAmount;
-
-    int256 public startingWethAmount;
-    int256 public startingPoolTokenAmount;
-    int256 public endingWethAmount;
-    int256 public endingPoolTokenAmount;
-
-    constructor(TSwapPool _pool) {
-        pool = _pool;
-        wethToken = ERC20Mock(_pool.getWeth());
-        poolToken = ERC20Mock(_pool.getPoolToken());
-    }
-
-    function deposit(uint256 wethAmount) public {
-        uint256 minWethAmount = pool.getMinimumWethDepositAmount();
-        wethAmount = bound(wethAmount, minWethAmount, type(uint64).max);
-
-        // Get actual starting amounts
-        startingWethAmount = int256(wethToken.balanceOf(address(pool)));
-        startingPoolTokenAmount = int256(poolToken.balanceOf(address(pool)));
-
-        // Get expected deltas
-        expectedDeltaWethAmount = int256(wethAmount);
-        expectedDeltaPoolTokenAmount = int256(
-            pool.getPoolTokensToDepositBasedOnWeth(wethAmount)
-        );
-
-        // Deposit
+    function test_audit_ConstantProductInvariantBreaks() public {
         vm.startPrank(liquidityProvider);
-        wethToken.mint(liquidityProvider, uint256(expectedDeltaWethAmount));
-        poolToken.mint(
-            liquidityProvider,
-            uint256(expectedDeltaPoolTokenAmount)
-        );
-        wethToken.approve(address(pool), uint256(expectedDeltaWethAmount));
-        poolToken.approve(address(pool), uint256(expectedDeltaPoolTokenAmount));
-
-        pool.deposit(
-            wethAmount,
-            0,
-            uint256(expectedDeltaPoolTokenAmount),
-            uint64(block.timestamp)
-        );
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
         vm.stopPrank();
 
-        // Get actual ending amounts
-        endingWethAmount = int256(wethToken.balanceOf(address(pool)));
-        endingPoolTokenAmount = int256(poolToken.balanceOf(address(pool)));
+        uint256 swapCount = 10;
+        uint256 outputWeth = 1e18;
+        int256 startingWethAmount = int256(weth.balanceOf(address(pool)));
+        int256 expectedDeltaWethAmount = -1 *
+            int256(outputWeth) *
+            int256(swapCount);
 
-        actualDeltaWethAmount =
-            int256(endingWethAmount) -
-            int256(startingWethAmount);
-        actualDeltaPoolTokenAmount =
-            int256(endingPoolTokenAmount) -
-            int256(startingPoolTokenAmount);
-    }
-
-    function swapFromOutputWeth(uint256 outputWeth) public {
-        uint256 minWethAmount = pool.getMinimumWethDepositAmount();
-        outputWeth = bound(
-            outputWeth,
-            minWethAmount,
-            wethToken.balanceOf(address(pool))
-        );
-
-        if (outputWeth >= wethToken.balanceOf(address(pool))) {
-            return;
-        }
-
-        uint256 poolTokenAmount = pool.getInputAmountBasedOnOutput(
-            outputWeth,
-            poolToken.balanceOf(address(pool)),
-            wethToken.balanceOf(address(pool))
-        );
-
-        if (poolTokenAmount >= type(uint64).max) {
-            return;
-        }
-
-        // Get actual starting amounts
-        startingWethAmount = int256(wethToken.balanceOf(address(pool)));
-        startingPoolTokenAmount = int256(poolToken.balanceOf(address(pool)));
-
-        // Get expected deltas
-        expectedDeltaWethAmount = -1 * int256(outputWeth);
-        expectedDeltaPoolTokenAmount = int256(poolTokenAmount);
-
-        if (poolToken.balanceOf(swapper) < poolTokenAmount) {
-            poolToken.mint(
-                swapper,
-                poolTokenAmount - poolToken.balanceOf(swapper)
+        vm.startPrank(user);
+        poolToken.mint(user, 1000e18);
+        poolToken.approve(address(pool), type(uint256).max);
+        for (uint256 i = 0; i < swapCount; i++) {
+            pool.swapExactOutput(
+                poolToken,
+                weth,
+                outputWeth,
+                uint64(block.timestamp)
             );
         }
-
-        vm.startPrank(swapper);
-        poolToken.approve(address(pool), poolTokenAmount);
-        pool.swapExactOutput(
-            poolToken,
-            wethToken,
-            outputWeth,
-            uint64(block.timestamp)
-        );
         vm.stopPrank();
 
-        // Get actual ending amounts
-        endingWethAmount = int256(wethToken.balanceOf(address(pool)));
-        endingPoolTokenAmount = int256(poolToken.balanceOf(address(pool)));
-
-        actualDeltaWethAmount =
-            int256(endingWethAmount) -
-            int256(startingWethAmount);
-        actualDeltaPoolTokenAmount =
-            int256(endingPoolTokenAmount) -
-            int256(startingPoolTokenAmount);
-    }
-}
-```
-
-Paste this code as `Invariant.t.sol` in `test/invariant` directory
-
-```javascript
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
-
-import {Test} from "forge-std/Test.sol";
-import {StdInvariant} from "forge-std/StdInvariant.sol";
-import {ERC20Mock} from "../mocks/ERC20Mock.sol";
-import {PoolFactory} from "../../src/PoolFactory.sol";
-import {TSwapPool} from "../../src/TSwapPool.sol";
-import {Handler} from "./Handler.t.sol";
-
-contract InvariantTest is StdInvariant, Test {
-    int256 constant STARTING_WETH = 50 ether;
-    int256 constant STARTING_POOL_TOKEN = 100 ether;
-
-    Handler internal handler;
-    ERC20Mock internal wethToken;
-    ERC20Mock internal poolToken;
-
-    PoolFactory internal poolFactory;
-    TSwapPool internal pool; // WETH/POOL_TOKEN
-
-    function setUp() public {
-        wethToken = new ERC20Mock();
-        poolToken = new ERC20Mock();
-        poolFactory = new PoolFactory(address(wethToken));
-        pool = TSwapPool(poolFactory.createPool(address(poolToken)));
-        handler = new Handler(pool);
-
-        // Create initial x & y balances
-        poolToken.mint(address(this), uint256(STARTING_POOL_TOKEN));
-        wethToken.mint(address(this), uint256(STARTING_WETH));
-
-        // Approve pool to transfer tokens
-        poolToken.approve(address(pool), uint256(STARTING_POOL_TOKEN));
-        wethToken.approve(address(pool), uint256(STARTING_WETH));
-
-        // Add initial liquidity with deposit
-        pool.deposit(
-            uint256(STARTING_WETH),
-            uint256(STARTING_WETH),
-            uint256(STARTING_POOL_TOKEN),
-            uint64(block.timestamp)
-        );
-
-        bytes4[] memory selectors = new bytes4[](2);
-        selectors[0] = handler.deposit.selector;
-        selectors[1] = handler.swapFromOutputWeth.selector;
-
-        targetSelector(
-            FuzzSelector({addr: address(handler), selectors: selectors})
-        );
-        targetContract(address(handler));
-    }
-
-    function statefulFuzz_ConstantProductFormulaStaysTheSameX() public {
+        int256 endingWethAmount = int256(weth.balanceOf(address(pool)));
+        int256 actualDeltaWethAmount = endingWethAmount - startingWethAmount;
         assertEq(
-            handler.actualDeltaPoolTokenAmount(),
-            handler.expectedDeltaPoolTokenAmount()
+            actualDeltaWethAmount,
+            expectedDeltaWethAmount,
+            "WETH amount did not change as expected"
         );
     }
-
-    function statefulFuzz_ConstantProductFormulaStaysTheSameY() public {
-        assertEq(
-            handler.actualDeltaWethAmount(),
-            handler.expectedDeltaWethAmount()
-        );
-    }
-}
 ```
 
 **Recommended Mitigation:** There are few options to mitigate this issue:
 
-1. Remove the transfer of tokens from the pool reserves. This means that the pool will not have less tokens than it should have. This means that the pool will have the correct value.
-2. Mint or transfer another ERC20 token to the user. This means that the pool will have the correct value but users will continue to get incentive tokens.
+1. Remove the transfer of tokens from the pool reserves. This removes the possibility of draining the protocol of funds, but also removes the incentive for users to swap.
+2. Mint or transfer another ERC20 token created only for incentives to users. This means that the pool will have the correct value and users will continue to get incentive to swap.
 
 # Medium
 
