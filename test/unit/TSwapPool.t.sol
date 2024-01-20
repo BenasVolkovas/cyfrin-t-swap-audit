@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, console2} from "forge-std/Test.sol";
 import {TSwapPool} from "../../src/PoolFactory.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -147,5 +147,40 @@ contract TSwapPoolTest is Test {
             expectedDeltaWethAmount,
             "WETH amount did not change as expected"
         );
+    }
+
+    function test_audit_sellPoolTokensSellsIncorrectAmount() public {
+        poolToken.mint(user, 100_000_000 ether);
+        weth.mint(user, 100_000_000 ether);
+        poolToken.mint(liquidityProvider, 1_000_000 ether);
+        weth.mint(liquidityProvider, 1_000_000 ether);
+
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100 ether);
+        poolToken.approve(address(pool), 100_000 ether);
+        pool.deposit(
+            100 ether,
+            100 ether,
+            100_000 ether,
+            uint64(block.timestamp)
+        );
+        vm.stopPrank();
+
+        uint256 sellAmount = 50 ether;
+        uint256 startingUserPoolTokenBalance = poolToken.balanceOf(user);
+
+        vm.startPrank(user);
+        poolToken.approve(address(pool), type(uint256).max);
+        pool.sellPoolTokens(sellAmount);
+        vm.stopPrank();
+
+        uint256 endingUserPoolTokenBalance = poolToken.balanceOf(user);
+        uint256 poolTokenBalanceDiff = startingUserPoolTokenBalance -
+            endingUserPoolTokenBalance;
+        uint256 actualSoldAmount = ((100_000 ether * 50 ether) *
+            uint256(10000)) / ((100 ether - 50 ether) * uint256(997));
+
+        assertNotEq(actualSoldAmount, sellAmount);
+        assertEq(poolTokenBalanceDiff, actualSoldAmount);
     }
 }

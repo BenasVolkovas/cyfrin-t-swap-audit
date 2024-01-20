@@ -82,7 +82,7 @@ Paste this test in `test/unit/TSwapPool.t.sol` directory
 
 **Recommended Mitigation:** Change the "magic number" `10000` to `1000`. Define constant variable at the beginning of the contract.
 
-### [H-2] Lack of slippage protection in `TSwapPool::swapExactInput` allows to sandwich the transaction and steal user's money
+### [H-2] Lack of slippage protection in `TSwapPool::swapExactInput` allows to front-run transactions and increase the price of the token.
 
 **Description:** In `swapExactInput`, the `maxInputAmount` parameter is not present and users cannot protect themself from slippage. This means that the user is not protected from price changes. This allows the attacker to front-run the transaction and increase the price of the token, which will cause the user to spend more than they wanted. After the victim's transaction is mined, the attacker can sell all the tokens they bought and make profit.
 
@@ -150,9 +150,48 @@ This is due to the fact that the function calls `swapExactOutput` with `outputTo
     3. `outputAmount` is `50 USDC`
     4. I am going to use a fixed `getInputAmountBasedOnOutput` function for clear visibility
     5. `((inputReserves * outputAmount) * 1000) / ((outputReserves - outputAmount) * 997)`
-    6. `((100'000 * 50) * 1000) / ((100 - 50) * 997)`
+    6. `((100'000 * 50) * 1000) / ((100 - 50) * 997)` (with fixed formula)
     7. `~= 100,300.90 USDC`
 5. Users wanted to sell `50 USDC` but instead they sold `100,300.90 USDC` worth of pool tokens.
+
+Paste this test in `test/unit/TSwapPool.t.sol` directory. Note that test uses old contract formula which uses `10000` instead of `1000`.
+
+```javascript
+        function test_audit_sellPoolTokensSellsIncorrectAmount() public {
+        poolToken.mint(user, 100_000_000 ether);
+        weth.mint(user, 100_000_000 ether);
+        poolToken.mint(liquidityProvider, 1_000_000 ether);
+        weth.mint(liquidityProvider, 1_000_000 ether);
+
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100 ether);
+        poolToken.approve(address(pool), 100_000 ether);
+        pool.deposit(
+            100 ether,
+            100 ether,
+            100_000 ether,
+            uint64(block.timestamp)
+        );
+        vm.stopPrank();
+
+        uint256 sellAmount = 50 ether;
+        uint256 startingUserPoolTokenBalance = poolToken.balanceOf(user);
+
+        vm.startPrank(user);
+        poolToken.approve(address(pool), type(uint256).max);
+        pool.sellPoolTokens(sellAmount);
+        vm.stopPrank();
+
+        uint256 endingUserPoolTokenBalance = poolToken.balanceOf(user);
+        uint256 poolTokenBalanceDiff = startingUserPoolTokenBalance -
+            endingUserPoolTokenBalance;
+        uint256 actualSoldAmount = ((100_000 ether * 50 ether) *
+            uint256(10000)) / ((100 ether - 50 ether) * uint256(997));
+
+        assertNotEq(actualSoldAmount, sellAmount);
+        assertEq(poolTokenBalanceDiff, actualSoldAmount);
+    }
+```
 
 **Recommended Mitigation:** Use `swapExactInput` instead of `swapExactOutput` to sell pool tokens. Note that this would also require changing the `sellPoolTokens` function to accept `minWethToReceive` which should be passed to `swapExactInput` as `minOutputAmount`.
 
