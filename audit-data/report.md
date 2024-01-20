@@ -1,3 +1,106 @@
+# T-Swap Audit Report
+
+Lead Auditors:
+
+-   [Benas Volkovas](https://github.com/BenasVolkovas)
+
+# Table of Contents
+
+- [T-Swap Audit Report](#t-swap-audit-report)
+- [Table of Contents](#table-of-contents)
+- [Disclaimer](#disclaimer)
+- [Risk Classification](#risk-classification)
+- [Audit Details](#audit-details)
+  - [Scope](#scope)
+- [Protocol Summary](#protocol-summary)
+  - [Roles](#roles)
+- [Executive Summary](#executive-summary)
+  - [Issues found](#issues-found)
+- [Findings](#findings)
+- [High](#high)
+    - [\[H-1\] Incorrect fee calculation causes the protocol to take fee of `90.03%` instead of `0.3%` and take funds from users](#h-1-incorrect-fee-calculation-causes-the-protocol-to-take-fee-of-9003-instead-of-03-and-take-funds-from-users)
+    - [\[H-2\] Lack of slippage protection in `TSwapPool::swapExactInput` allows to front-run transactions and increase the price of the token.](#h-2-lack-of-slippage-protection-in-tswappoolswapexactinput-allows-to-front-run-transactions-and-increase-the-price-of-the-token)
+    - [\[H-3\] Calling `TSwapPool::sellPoolTokens` mismatches input and output tokens causing users to receive incorrect amount of tokens](#h-3-calling-tswappoolsellpooltokens-mismatches-input-and-output-tokens-causing-users-to-receive-incorrect-amount-of-tokens)
+    - [\[H-4\] Transfering tokens for extra incentives in `TSwapPool::_swap` breaks the main protocol `x * y = k` invariant](#h-4-transfering-tokens-for-extra-incentives-in-tswappool_swap-breaks-the-main-protocol-x--y--k-invariant)
+- [Medium](#medium)
+    - [\[M-1\] `TSwapPool::deposit` does not check `deadline` parameter, causing the transaction to complete even after the deadline](#m-1-tswappooldeposit-does-not-check-deadline-parameter-causing-the-transaction-to-complete-even-after-the-deadline)
+- [Low](#low)
+    - [\[L-1\] Incorrect parameters order for `TSwapPool::LiquidityAdded` event in `TSwapPool::_addLiquidityMintAndTransfer` causes incorrect data emitted in event logs](#l-1-incorrect-parameters-order-for-tswappoolliquidityadded-event-in-tswappool_addliquiditymintandtransfer-causes-incorrect-data-emitted-in-event-logs)
+    - [\[L-2\] Default value (equal to `0`) is returned by `TSwapPool::swapExactInput` resulting in incorrect return value](#l-2-default-value-equal-to-0-is-returned-by-tswappoolswapexactinput-resulting-in-incorrect-return-value)
+- [Informational](#informational)
+    - [\[I-1\] `PoolFactory::constructor` paramerter `wethToken` is not checked, so `i_wethToken` can be set to zero address](#i-1-poolfactoryconstructor-paramerter-wethtoken-is-not-checked-so-i_wethtoken-can-be-set-to-zero-address)
+    - [\[I-2\] `PoolFactory::createPool` paramerter `tokenAddress` is not checked for zero address, which will revert when calling `ERC20::name`](#i-2-poolfactorycreatepool-paramerter-tokenaddress-is-not-checked-for-zero-address-which-will-revert-when-calling-erc20name)
+    - [\[I-3\] `TSwapPool::constructor` does not check for empty strings](#i-3-tswappoolconstructor-does-not-check-for-empty-strings)
+    - [\[I-4\] `PoolFactory::createPool` uses pool token name for LP token symbol](#i-4-poolfactorycreatepool-uses-pool-token-name-for-lp-token-symbol)
+    - [\[I-5\] `TSwapPool` state variables are not in order](#i-5-tswappool-state-variables-are-not-in-order)
+    - [\[I-6\] `TSwapPool::constructor` does not check for zero addresses](#i-6-tswappoolconstructor-does-not-check-for-zero-addresses)
+    - [\[I-7\] `TSwapPool::deposit` external call before changing return value in `else` condition block](#i-7-tswappooldeposit-external-call-before-changing-return-value-in-else-condition-block)
+    - [\[I-8\] `getOutputAmountBasedOnInput`, `getInputAmountBasedOnOutput`, `swapExactInput` have no natspec comments](#i-8-getoutputamountbasedoninput-getinputamountbasedonoutput-swapexactinput-have-no-natspec-comments)
+    - [\[I-9\] `TSwapPool::getOutputAmountBasedOnInput` contains "magic number", which are not constants](#i-9-tswappoolgetoutputamountbasedoninput-contains-magic-number-which-are-not-constants)
+    - [\[I-10\] `TSwapPool::getInputAmountBasedOnOutput` contains "magic number", which are not constants](#i-10-tswappoolgetinputamountbasedonoutput-contains-magic-number-which-are-not-constants)
+    - [\[I-11\] `TSwapPool::swapExactInput` uses tokens `inputToken` and `outputToken` without checking if they are the same or zero addresses](#i-11-tswappoolswapexactinput-uses-tokens-inputtoken-and-outputtoken-without-checking-if-they-are-the-same-or-zero-addresses)
+    - [\[I-12\] `TSwapPool::swapExactOutput` is missing nat spec comment for `deadline` parameter](#i-12-tswappoolswapexactoutput-is-missing-nat-spec-comment-for-deadline-parameter)
+    - [\[I-13\] `TSwapPool::swapExactOutput` uses tokens `inputToken` and `outputToken` without checking if they are the same or zero addresses](#i-13-tswappoolswapexactoutput-uses-tokens-inputtoken-and-outputtoken-without-checking-if-they-are-the-same-or-zero-addresses)
+    - [\[I-14\] `TSwapPool::_swap` uses "magic number" `1_000_000_000_000_000_000`](#i-14-tswappool_swap-uses-magic-number-1_000_000_000_000_000_000)
+    - [\[I-15\] `TSwapPool::getPriceOfOneWethInPoolTokens` and `TSwapPool::getPriceOfOnePoolTokenInWeth` use "magic number"](#i-15-tswappoolgetpriceofonewethinpooltokens-and-tswappoolgetpriceofonepooltokeninweth-use-magic-number)
+- [Gas Optimization](#gas-optimization)
+    - [\[G-1\] `PoolFactory::PoolFactory__PoolDoesNotExist` error is defined but not used anywhere](#g-1-poolfactorypoolfactory__pooldoesnotexist-error-is-defined-but-not-used-anywhere)
+    - [\[G-2\] `TSwapPool::TSwapPool__WethDepositAmountTooLow` reverts with `MINIMUM_WETH_LIQUIDITY` as first argument, which is constant value in contract](#g-2-tswappooltswappool__wethdepositamounttoolow-reverts-with-minimum_weth_liquidity-as-first-argument-which-is-constant-value-in-contract)
+    - [\[G-3\] `TSwapPool::poolTokenReserves` is assigned to pool token balance but it is not used anywhere](#g-3-tswappoolpooltokenreserves-is-assigned-to-pool-token-balance-but-it-is-not-used-anywhere)
+    - [\[G-4\] `TSwapPool::swapExactInput` is set to be `public` but it is not used anywhere internally](#g-4-tswappoolswapexactinput-is-set-to-be-public-but-it-is-not-used-anywhere-internally)
+    - [\[G-5\] `TSwapPool::_swap` calls `safeTransfer` for `outputToken` twice, which is not needed](#g-5-tswappool_swap-calls-safetransfer-for-outputtoken-twice-which-is-not-needed)
+
+# Disclaimer
+
+I make all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+
+# Risk Classification
+
+|            |        | Impact |        |     |
+| ---------- | ------ | ------ | ------ | --- |
+|            |        | High   | Medium | Low |
+|            | High   | H      | H/M    | M   |
+| Likelihood | Medium | H/M    | M      | M/L |
+|            | Low    | M      | M/L    | L   |
+
+I use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate-a-finding-severity) severity matrix to determine severity. See the documentation for more details.
+
+# Audit Details
+
+The findings described in this document correspond to the following codebase: https://github.com/Cyfrin/5-t-swap-audit.
+
+And commit hash: `f4337615b7eada3d871378ff8b70af08277d3dec`
+
+## Scope
+
+src/
+--- PoolFactory.sol
+--- TSwapPool.sol
+
+# Protocol Summary
+
+This project is meant to be a permissionless way for users to swap assets between each other at a fair price. You can think of T-Swap as a decentralized asset/token exchange (DEX).
+T-Swap is known as an Automated Market Maker (AMM) because it doesn't use a normal "order book" style exchange, instead it uses "Pools" of an asset.
+
+## Roles
+
+-   User: Anyone who interacts with the protocol.
+
+# Executive Summary
+
+## Issues found
+
+| Severity          | Number of issues found |
+| ----------------- | ---------------------- |
+| High              | 4                      |
+| Medium            | 1                      |
+| Low               | 2                      |
+| Info              | 15                     |
+| Gas Optimizations | 5                      |
+| Total             | 27                     |
+
+# Findings
+
 # High
 
 ### [H-1] Incorrect fee calculation causes the protocol to take fee of `90.03%` instead of `0.3%` and take funds from users
@@ -111,7 +214,6 @@ Paste this test in `test/unit/TSwapPool.t.sol` directory
         revertIfDeadlinePassed(deadline)
         returns (uint256 inputAmount)
     {
-        // @done @audit-i check that tokens are not zero address
         uint256 inputReserves = inputToken.balanceOf(address(this));
         uint256 outputReserves = outputToken.balanceOf(address(this));
 
@@ -585,11 +687,8 @@ Modifier example:
 
 ```
     swap_count++;
-    // @todo @audit-v breaks x * y = k invariant
     if (swap_count >= SWAP_COUNT_MAX) {
         swap_count = 0;
-        // @done @audit-i no magic numbers
-        // @todo @audit-g we can save some gas if we transfer the output token only once at the end
 @>      outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
     }
     emit Swap(
@@ -608,11 +707,8 @@ Modifier example:
 
 ```diff
     swap_count++;
-    // @todo @audit-v breaks x * y = k invariant
     if (swap_count >= SWAP_COUNT_MAX) {
         swap_count = 0;
-        // @done @audit-i no magic numbers
-        // @todo @audit-g we can save some gas if we transfer the output token only once at the end
 -       outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
 +       outputAmount += 1_000_000_000_000_000_000;
     }
