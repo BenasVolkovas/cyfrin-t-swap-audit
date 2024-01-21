@@ -74,7 +74,9 @@ And commit hash: `f4337615b7eada3d871378ff8b70af08277d3dec`
 ## Scope
 
 src/
+
 --- PoolFactory.sol
+
 --- TSwapPool.sol
 
 # Protocol Summary
